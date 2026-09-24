@@ -1,0 +1,17 @@
+{
+  "name": "chat-atlas",
+  "version": "0.1.0",
+  "description": "Private, offline Telegram conversation analytics with portable HTML reports",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "start": "node scripts/serve.mjs",
+    "analyze": "node scripts/analyze.mjs"
+  },
+  "license": "MIT"
+}

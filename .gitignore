@@ -1,0 +1,14 @@
+node_modules/
+.DS_Store
+.env*
+!.env.example
+.private/
+reports/
+exports/
+result.json
+*.log
+*.zip
+# Generated HTML reports may contain private aggregates or lexical content.
+*.html
+!dist/index.html
+!src/index.template.html

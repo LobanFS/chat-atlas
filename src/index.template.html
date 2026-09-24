@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Локальный анализ Telegram-переписки: ритм, инициатива, обмен репликами. Без загрузки на сервер.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; worker-src blob:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='13' fill='%23147d78'/%3E%3Cpath d='M12 15h24v15H24l-8 6v-6h-4z' fill='white'/%3E%3C/svg%3E">
+<title>Chat Atlas — ритм вашего диалога</title>
+<style>/*__STYLES__*/</style>
+</head>
+<body>
+<a class="skip-link" href="#workspace">К анализу</a>
+<header class="app-header"><a class="brand" href="#"><span class="brand-mark" aria-hidden="true">↔</span>chat atlas<span class="version">/ 01</span></a><span class="local-label"><span aria-hidden="true">◈</span> Только на вашем устройстве</span><button class="text-button" id="help-toggle" aria-expanded="false" aria-controls="help">Как выгрузить чат</button></header>
+<div class="help-panel" id="help" hidden><strong>Нужен Telegram Desktop</strong><p>Откройте личный чат → меню ⋮ → «Экспорт истории чата». В формате выберите <b>JSON</b>. Фото и видео скачивать не обязательно. Затем выберите файл <code>result.json</code> ниже. Поддерживаются экспорты одного личного чата; общий архив аккаунта и группы пока не поддерживаются.</p></div>
+<main id="workspace">
+<section class="welcome" id="welcome"><div class="welcome-copy"><p class="eyebrow">TELEGRAM / 1:1 / OFFLINE</p><h1>У каждого диалога<br>свой <em>ритм.</em></h1><p class="welcome-lead">Узнайте, как меняется ваше общение.<br>Кто начинает, как вы отвечаете и что связывает дни.</p><div class="welcome-tags"><span>Динамика по дням</span><span>Инициатива</span><span>Обмен репликами</span></div></div>
+<div class="import-card" id="drop-zone"><span class="upload-icon" aria-hidden="true">↥</span><h2>Начните с переписки</h2><p>Перетащите сюда <code>result.json</code><br>или выберите файл с устройства</p><label class="button primary file-label">Выбрать JSON<input id="file-input" type="file" accept=".json,application/json" aria-label="Выбрать JSON переписки"></label><button class="button secondary" id="demo-button">Посмотреть демо <span aria-hidden="true">↗</span></button><p class="privacy-note">Файл обрабатывается в браузере.<br>Никаких аккаунтов, загрузок или AI-сервисов.</p></div></section>
+<div id="status" class="status" role="status" aria-live="polite" hidden></div><div id="error" class="error-banner" role="alert" hidden></div>
+<section id="analysis-shell" hidden>
+<div class="report-heading"><div><p class="eyebrow">АТЛАС ВАШЕГО ОБЩЕНИЯ</p><h1>Ритм диалога<span class="title-dot">.</span></h1><p id="dataset-label" class="dataset-label"></p></div><div class="report-actions"><button class="button secondary" id="reset-button">Другой файл</button><button class="button primary" id="download-button">Скачать HTML <span aria-hidden="true">↓</span></button></div></div>
+<form id="settings" class="settings"><div class="settings-main"><label>Пауза между диалогами<select id="gap" name="gap"><option value="2">2 часа</option><option value="6" selected>6 часов</option><option value="12">12 часов</option><option value="24">24 часа</option></select></label><label>Время на графиках<select id="timezone" name="timezone"><option value="export">Как в экспорте</option><option value="Europe/Moscow">Москва · UTC+3</option><option value="UTC">UTC</option><option value="Europe/Berlin">Берлин</option><option value="America/New_York">Нью-Йорк</option><option value="Asia/Almaty">Алматы</option></select></label><label>Состав отчёта<select id="mode" name="mode"><option value="full">Весь анализ</option><option value="overview">Краткий обзор</option><option value="rhythm">Ритм и динамика</option><option value="dialogue">Инициатива и ответы</option></select></label><label class="check-label"><input id="anonymize" type="checkbox" checked><span>Скрыть имена</span></label><label class="check-label"><input id="include-lexicon" type="checkbox"><span>Слова и эмодзи</span></label></div><details class="range-details"><summary>Выбрать период</summary><div class="range-controls"><label>С даты<input id="start-date" type="date"></label><label>По дату включительно<input id="end-date" type="date"></label><button class="button small secondary" id="apply-range" type="submit">Применить</button><button class="text-button" id="clear-range" type="button">Весь период</button></div></details></form>
+<nav class="report-nav" aria-label="Разделы отчёта" id="report-nav"></nav>
+<div id="report" aria-live="polite"></div>
+</section>
+</main>
+<footer class="app-footer"><a class="brand footer-brand" href="#">chat atlas</a><p>Числа описывают общение. Значение ему придаёте вы.</p><span>Локально · Открытая методика · Без AI</span></footer>
+<script>/*__SCRIPT__*/</script>
+</body></html>
