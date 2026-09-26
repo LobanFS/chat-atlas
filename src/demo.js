@@ -23,9 +23,37 @@ export function createDemo() {
         if (random()<.08) m.reactions=[{type:'emoji',count:1,emoji:'❤'}];
         if (random()<.04) m.forwarded_from='Демо-канал';
         if (random()<.06) m.edited=m.date;
+        if(m.text && random()<.09)m.text='Ахахаха, отличный план 😂';
         messages.push(m);
       }
     }
   }
   return {name:'Демонстрация',type:'personal_chat',messages};
+}
+
+
+/** Deterministic fictional group: no messages or identifiers from private exports. */
+export function createGroupDemo() {
+  let seed=73124;
+  const random=()=>((seed=(Math.imul(seed,1664525)+1013904223)>>>0)/4294967296);
+  const names=['Саша','Женя','Маша','Даня','Соня','Лёша','Ника','Кирилл','Аня'];
+  const texts=['В субботу идём гулять?','Нашёл отличный маршрут, обсудим вечером.','Возьму термос и печенье!','Ахахаха, договорились 😂','Хехе, это точно наш план','Давайте встретимся у парка','Ого, красиво 🤍','Скину фотографии после прогулки'];
+  const messages=[];let id=1;
+  for(let day=0;day<150;day++){
+    if(random()<.09)continue;
+    const count=Math.floor(15+random()*80*(day>105?1.6:1));
+    for(let i=0;i<count;i++){
+      const who=Math.min(8,Math.floor(random()**1.6*9));
+      const time=Date.UTC(2026,3,1+day,9)+Math.floor(i/count*13*3600+random()*90)*1000;
+      const m={id:id++,type:'message',date:new Date(time).toISOString().slice(0,19),date_unixtime:String(time/1000),from:names[who],from_id:'demo-user-'+who,text:texts[Math.floor(random()*texts.length)]};
+      if(messages.length && random()<.35)m.reply_to_message_id=messages[Math.max(0,messages.length-1-Math.floor(random()*12))].id;
+      const media=random();
+      if(media<.09){m.media_type='sticker';m.text='';}
+      else if(media<.13){m.photo='synthetic-photo';m.text='';}
+      else if(media<.15){m.media_type='voice_message';m.duration_seconds=15+Math.floor(random()*60);m.text='';}
+      if(random()<.18)m.reactions=[{type:'emoji',emoji:'❤',count:1+Math.floor(random()*4)}];
+      messages.push(m);
+    }
+  }
+  return {type:'private_supergroup',name:'Друзья и прогулки · демо',id:987654,messages};
 }

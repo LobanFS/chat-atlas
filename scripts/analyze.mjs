@@ -7,7 +7,7 @@ import { renderDocument } from '../src/document.js';
 
 const MAX_BYTES = 200 * 1024 * 1024;
 const MODES = new Set(['full', 'overview', 'rhythm', 'dialogue']);
-const USAGE = `Chat Atlas — локальный HTML-отчёт о личной переписке Telegram.
+const USAGE = `Chat Atlas — локальный HTML-отчёт о личной переписке или группе Telegram.
 
 Использование:
   node scripts/analyze.mjs INPUT.json [--out OUTPUT.html] [настройки]
@@ -80,7 +80,7 @@ async function main(args) {
   const outputPath = resolve(config.output);
   const inputStat = await stat(inputPath);
   if (!inputStat.isFile()) throw new Error('Входной путь должен указывать на JSON-файл, а не на каталог.');
-  if (inputStat.size > MAX_BYTES) throw new Error('Файл больше 200 МиБ. Экспортируйте более короткий период одного личного чата.');
+  if (inputStat.size > MAX_BYTES) throw new Error('Файл больше 200 МиБ. Экспортируйте более короткий период одного чата.');
   await assertSafeOutput(inputPath, outputPath, inputStat, config.force);
   const source = await readFile(inputPath, 'utf8');
   let input;
@@ -88,9 +88,9 @@ async function main(args) {
   catch { throw new Error('Не удалось прочитать JSON. Проверьте файл и выберите формат JSON при экспорте из Telegram.'); }
   const data = analyzeExport(input, config.options);
   const body = renderReport(data, { mode: config.mode });
-  const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
-  const runtimeSource=await readFile(new URL('../src/explore.js',import.meta.url),'utf8');
-  const runtime=runtimeSource.replace(/^export\s+/gm,'')+'\nbindExplorer(document.getElementById("portable-report"),JSON.parse(document.getElementById("report-data").textContent));';
+  const styles = (await Promise.all(['../src/styles.css','../src/group.css'].map(path=>readFile(new URL(path,import.meta.url),'utf8')))).join('\n');
+  const runtimeSource=await readFile(new URL(data.meta.chatType==='group'?'../src/group-explore.js':'../src/explore.js',import.meta.url),'utf8');
+  const runtime=runtimeSource.replace(/^import[^\n]*\n/gm,'').replace(/^export\s+/gm,'')+'\n'+(data.meta.chatType==='group'?'bindGroupExplorer':'bindExplorer')+'(document.getElementById("portable-report"),JSON.parse(document.getElementById("report-data").textContent));';
   const html = renderDocument(data, body, styles, { mode: config.mode, runtime });
   // Check again after analysis; wx also prevents a newly created file from being overwritten.
   await assertSafeOutput(inputPath, outputPath, inputStat, config.force);

@@ -1,4 +1,5 @@
 import { renderExplorer } from './explore.js';
+import { renderGroupReport, renderLaughterPanel } from './group-report.js';
 const COLORS = { a: '#147d78', b: '#6760d5', ink: '#26364b', muted: '#66788b', line: '#e7edf1' };
 const MEDIA = [
   ['photo', 'Фотографии'], ['voice_message', 'Голосовые'], ['video_message', 'Видеокружки'],
@@ -163,7 +164,7 @@ function mediaPanel(data) {
 }
 
 function habits(data) {
-  return `<section class="report-section" id="habits">${sectionHead('04 / Привычки', 'Когда и чем вы общаетесь', 'Узнаваемый ритм без чтения содержимого.')}<div class="panel"><div class="panel-head"><h3>Часы на связи</h3><span class="badge">7 дней × 24 часа</span></div>${heatmap(data)}</div>${mediaPanel(data)}</section>`;
+  return `<section class="report-section" id="habits">${sectionHead('04 / Привычки', 'Когда и чем вы общаетесь', 'Узнаваемый ритм без чтения содержимого.')}<div class="panel"><div class="panel-head"><h3>Часы на связи</h3><span class="badge">7 дней × 24 часа</span></div>${heatmap(data)}</div>${mediaPanel(data)}${renderLaughterPanel(data)}</section>`;
 }
 
 function hasLexicon(data) {
@@ -210,6 +211,7 @@ function methodology(data) {
 export function renderReport(data, { mode = 'full', explorerPrefs = {} } = {}) {
   if (!data || typeof data !== 'object') throw new TypeError('Для отчёта нужны результаты анализа.');
   if (!['full', 'overview', 'rhythm', 'dialogue'].includes(mode)) throw new TypeError('Неизвестный режим отчёта.');
+  if (data.meta?.chatType === 'group') return renderGroupReport(data, { mode, explorerPrefs });
   const output = [overview(data)];
   if (mode === 'full' || mode === 'rhythm') output.push(rhythm(data,explorerPrefs));
   if (mode === 'full' || mode === 'dialogue') output.push(dialogue(data));

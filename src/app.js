@@ -3,7 +3,7 @@ let profiles=[], participantNames={}, explorerPrefs={};
 let worker = null, result = null, busy = false, isDemo = false, jobId = 0, resultCurrent = false;
 function setBusy(value,message='Считаем…') {
  busy=value; $('status').hidden=!value; $('status').textContent=message;
- for(const el of document.querySelectorAll('#identity-settings input, #identity-settings button, #settings input, #settings select, #settings button, #download-button, #demo-button, #file-input')) el.disabled=value;
+ for(const el of document.querySelectorAll('#identity-settings input, #identity-settings button, #settings input, #settings select, #settings button, #download-button, #demo-button, #group-demo-button, #file-input')) el.disabled=value;
  $('analysis-shell').setAttribute('aria-busy',String(value));
  $('download-button').disabled=value||!resultCurrent;
 }
@@ -29,29 +29,35 @@ function analyze(payload={}) {
 }
 function loadFile(file){
  if(!file||busy)return;
- if(file.size>200*1024*1024){showError('Файл больше 200 МБ. Экспортируйте более короткий период: этот анализатор рассчитан на отдельный личный чат.');return;}
+ if(file.size>200*1024*1024){showError('Файл больше 200 МБ. Экспортируйте более короткий период: этот анализатор рассчитан на экспорт одного чата.');return;}
  isDemo=false;participantNames={};profiles=[];explorerPrefs={};$('start-date').value='';$('end-date').value='';analyze({file});
 }
 function render(){
  if(!result||!resultCurrent)return;
  $('report').hidden=false; $('report-nav').hidden=false;
  const mode=$('mode').value;
- $('dataset-label').textContent=`${isDemo?'Демо · синтетические данные · ':''}${result.meta.startDate||'Нет дат'} — ${result.meta.endDate||'Нет дат'} · ${result.participants.map(p=>p.name).join(' и ')}`;
- $('report-nav').innerHTML=renderNavigation(mode,Boolean(result.meta.includeLexicon&&result.lexicon));
- const previousExplorer=$('report').querySelector('[data-explorer]');
- if(previousExplorer)explorerPrefs=explorerOptions(previousExplorer.dataset);
+ $('dataset-label').textContent=`${isDemo?'Демо · синтетические данные · ':''}${result.meta.startDate||'Нет дат'} — ${result.meta.endDate||'Нет дат'} · ${result.meta.chatType==='group'?'Группа · авторов в экспорте: '+result.participants.length:result.participants.map(p=>p.name).join(' и ')}`;
+ $('report-nav').innerHTML=renderNavigation(mode,Boolean(result.meta.includeLexicon&&result.lexicon),result.meta.chatType==='group');
+ const group=result.meta.chatType==='group';
+ $('report-title').textContent=group?'Ритм группы.':'Ритм диалога.';
+ const previousExplorer=$('report').querySelector(group?'[data-group-explorer]':'[data-explorer]');
+ if(previousExplorer)explorerPrefs=group?groupExplorerOptions(previousExplorer.dataset,result.participants):explorerOptions(previousExplorer.dataset);
  $('report').innerHTML=renderReport(result,{mode,explorerPrefs});
- bindExplorer($('report'),result);
+ if(group)bindGroupExplorer($('report'),result);else bindExplorer($('report'),result);
  renderIdentity();
 }
 function exportHtml(){
  if(!result||busy||!resultCurrent)return;
  const mode=$('mode').value;
- const html=renderDocument(result,$('report').innerHTML,REPORT_STYLES,{mode,isDemo,runtime:REPORT_RUNTIME});
+ const copy=$('report').cloneNode(true);
+ for(const input of copy.querySelectorAll('input')){input.setAttribute('value',input.value);if(input.type==='checkbox')input.toggleAttribute('checked',input.checked);}
+ for(const option of copy.querySelectorAll('option'))option.toggleAttribute('selected',option.selected);
+ const html=renderDocument(result,copy.innerHTML,REPORT_STYLES,{mode,isDemo,runtime:result.meta.chatType==='group'?GROUP_RUNTIME:REPORT_RUNTIME});
  const blob=new Blob([html],{type:'text/html;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`chat-atlas-${result.meta.startDate||'report'}-${mode}.html`;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);
 }
 $('file-input').addEventListener('change',e=>loadFile(e.target.files[0]));
 $('demo-button').addEventListener('click',()=>{isDemo=true;participantNames={};profiles=[];explorerPrefs={};$('start-date').value='';$('end-date').value='';analyze({demo:createDemo()});});
+$('group-demo-button').addEventListener('click',()=>{isDemo=true;participantNames={};profiles=[];explorerPrefs={};$('start-date').value='';$('end-date').value='';analyze({demo:createGroupDemo()});});
 $('download-button').addEventListener('click',exportHtml);
 $('settings').addEventListener('submit',e=>{e.preventDefault();if(!busy)analyze();});
 for(const id of ['gap','timezone','anonymize','include-lexicon'])$(id).addEventListener('change',()=>analyze());

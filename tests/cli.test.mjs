@@ -163,3 +163,26 @@ test('CLI accepts paths with spaces and reports missing paths without a stack tr
   failure(result, /Не найден входной файл/);
   assert.doesNotMatch(result.stderr, /at \w+|node:internal/);
 });
+
+test('CLI automatically renders an offline group report with explicit replies and laughter', async t => {
+  const {run,input,output}=await workspace(t);
+  const chat=syntheticChat();chat.type='private_supergroup';chat.id=200;
+  for(let i=0;i<chat.messages.length;i++){
+    chat.messages[i].from_id='user'+(i%4);
+    chat.messages[i].from='PRIVATE_PERSON_'+(i%4);
+    chat.messages[i].text='Ахахааа 😂';
+    if(i)chat.messages[i].reply_to_message_id=i;
+  }
+  await writeFile(input,JSON.stringify(chat));
+  success(run(input,'--out',output));
+  const html=await readFile(output,'utf8');
+  assert.match(html,/Ритм группы/);assert.match(html,/data-group-explorer/);assert.match(html,/bindGroupExplorer/);
+  assert.match(html,/Кому адресованы ответы/);assert.match(html,/Смех в переписке/);
+  assert.doesNotMatch(html,/PRIVATE_PERSON_|PRIVATE_SYNTHETIC_CHAT_TITLE|Ахахааа/);
+  const payload=JSON.parse(html.match(/id="report-data">([\s\S]*?)<\/script>/)[1]);
+  assert.equal(payload.participants.length,4);
+  assert.equal(payload.daily.reduce((sum,d)=>sum+d.totalLaughter,0),12);
+  success(run(input,'--out',output,'--mode','overview','--force'));
+  const overview=await readFile(output,'utf8');
+  assert.match(overview,/bindGroupExplorer/);assert.doesNotMatch(overview,/id="rhythm"/);
+});

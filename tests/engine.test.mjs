@@ -47,8 +47,8 @@ test('empty exports and a one-message one-author chat have honest empty response
   assertFiniteTree(one);
 });
 
-test('rejects account archives, group chats and exports with more than two speakers', () => {
-  for (const input of [null, [], {}, { chats: { list: [] } }, chat([], { type: 'private_group' }), chat('bad')]) {
+test('rejects account archives, channels and personal exports with more than two speakers', () => {
+  for (const input of [null, [], {}, { chats: { list: [] } }, chat([], { type: 'public_channel' }), chat([], { type: 'private_channel' }), chat('bad')]) {
     assert.throws(() => analyzeExport(input), /личной переписки/);
   }
   assert.throws(() => analyze(['A', 'B', 'C'].map((author, index) => message(index, author, at(index)))), /больше двух авторов/);

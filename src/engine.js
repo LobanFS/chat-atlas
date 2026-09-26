@@ -20,9 +20,13 @@ const STOP_WORDS = new Set(`
 about above after again against ain all also am an and any are aren aren't as at be because been before being below between both but by can cannot can't could couldn couldn't did didn didn't do does doesn doesn't doing don don't down during each few for from further get got had hadn hadn't has hasn hasn't have haven haven't having he her here hers herself him himself his how i if in into is isn isn't it its it's itself just ll me might mightn mightn't more most must mustn mustn't my myself need needn needn't no nor not now of off on once only or other our ours ourselves out over own re same shan shan't she she's should shouldn shouldn't should've so some such than that that'll that's the their theirs them themselves then there there's these they this those through to too under until up us ve very was wasn wasn't we were weren weren't what what's when where which while who whom why will with won won't would wouldn wouldn't you you'd you'll you're you've your yours yourself yourselves
 `.trim().split(/\s+/u));
 
+function stripAddresses(text) {
+  return /[.@]|:\/\//u.test(text) ? text.replace(/(?:https?|ftp|tg):\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+|[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[\p{L}]{2,}|(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+[\p{L}]{2,}(?::\d+)?(?:[/?#][^\s<>"']*)?/giu, ' ') : text;
+}
+
 function countLexicon(text, accumulator, segmenter) {
   // Strip URLs and email addresses before tokenization; hidden entity targets are never read.
-  const cleaned = /[.@]|:\/\//u.test(text) ? text.replace(/(?:https?|ftp|tg):\/\/[^\s<>"']+|mailto:[^\s<>"']+|www\.[^\s<>"']+|[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[\p{L}]{2,}|(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+[\p{L}]{2,}(?::\d+)?(?:[/?#][^\s<>"']*)?/giu, ' ') : text;
+  const cleaned = stripAddresses(text);
   for (const match of cleaned.matchAll(/[\p{L}\p{M}\p{N}]+(?:['’_-][\p{L}\p{M}\p{N}]+)*/gu)) {
     const term = match[0].toLowerCase().normalize('NFC');
     if (!/\p{L}/u.test(term) || STOP_WORDS.has(term)) continue;
@@ -38,25 +42,24 @@ function countLexicon(text, accumulator, segmenter) {
   }
 }
 
-function lexiconResult(byIdentity, identityMap) {
-  const byKey = { a: { words: new Map(), emojis: new Map() }, b: { words: new Map(), emojis: new Map() } };
-  for (const [identity, counts] of byIdentity) byKey[identityMap.get(identity)] = counts;
-  const topTerms = (field) => {
-    const a = byKey.a[field], b = byKey.b[field], top = [];
-    const compare = (left, right) => right.total - left.total || (left.term < right.term ? -1 : left.term > right.term ? 1 : 0);
-    const insert = (term) => {
-      const row = { term, a: a.get(term) || 0, b: b.get(term) || 0, total: (a.get(term) || 0) + (b.get(term) || 0) };
-      let index = 0;
-      while (index < top.length && compare(top[index], row) <= 0) index++;
-      if (index < LEXICON_LIMIT) {
-        top.splice(index, 0, row);
-        if (top.length > LEXICON_LIMIT) top.pop();
+function lexiconResult(byIdentity, identityMap, isGroup) {
+  const totals = new Map();
+  for (const [identity, counts] of byIdentity) {
+    const key = identityMap.get(identity);
+    for (const field of ['words', 'emojis']) {
+      if (!totals.has(field)) totals.set(field, new Map());
+      const terms = totals.get(field);
+      for (const [term, count] of counts[field]) {
+        if (!terms.has(term)) terms.set(term, { term, a: 0, b: 0, total: 0, ...(isGroup ? { byParticipant: {} } : {}) });
+        const row = terms.get(term);
+        if (key === 'a' || key === 'b') row[key] += count;
+        if (isGroup) row.byParticipant[key] = count;
+        row.total += count;
       }
-    };
-    for (const term of a.keys()) insert(term);
-    for (const term of b.keys()) if (!a.has(term)) insert(term);
-    return top;
-  };
+    }
+  }
+  const topTerms = (field) => [...(totals.get(field)?.values() || [])]
+    .sort((left, right) => right.total - left.total || (left.term < right.term ? -1 : left.term > right.term ? 1 : 0)).slice(0, LEXICON_LIMIT);
   return { words: topTerms('words'), emojis: topTerms('emojis'), excludedStopWords: true, minimumWordLength: 3, limit: LEXICON_LIMIT };
 }
 
@@ -158,7 +161,7 @@ function validateOptions(input) {
   if (options.startDate && options.endDate && (parseDay(options.endDate) - parseDay(options.startDate)) / DAY + 1 > MAX_DAYS) {
     throw new Error('Слишком длинный период: выберите не больше 100 лет.');
   }
-  if (!options.participantNames || typeof options.participantNames !== 'object' || Array.isArray(options.participantNames) || Object.entries(options.participantNames).some(([key,value]) => !['a','b'].includes(key) || typeof value !== 'string' || value.length > 80)) throw new Error('Подписи участников: строки до 80 символов для a и b.');
+  if (!options.participantNames || typeof options.participantNames !== 'object' || Array.isArray(options.participantNames) || Object.entries(options.participantNames).some(([key,value]) => !/^(?:a|b|p[3-9]|p[1-9][0-9]+)$/.test(key) || typeof value !== 'string' || value.length > 80)) throw new Error('Подписи участников: строки до 80 символов для ключей a, b, p3, p4 и далее.');
   return { options, formatter };
 }
 
@@ -195,6 +198,7 @@ function hasLink(message, text) {
 
 function measure(message, lexicalCounts = null, segmenter = null) {
   const text = flattenText(message.text);
+  const laughterText = stripAddresses(text).replace(/([ахеahe])\1+/giu, '$1');
   if (lexicalCounts) countLexicon(text, lexicalCounts, segmenter);
   let words = 0, characters = 0;
   for (const match of text.matchAll(/[\p{L}\p{N}]+(?:['’_-][\p{L}\p{N}]+)*/gu)) words++;
@@ -207,6 +211,10 @@ function measure(message, lexicalCounts = null, segmenter = null) {
   }, 0) : 0;
   return {
     words, characters,
+    // Collapse stretched letters, then require whole repeated-syllable tokens.
+    // Ordinary words, URL/email text, and reactions are excluded.
+    laughterMessages: /(?:^|[^\p{L}\p{M}\p{N}])(?:(?:ах){2,}а?|(?:ха){2,}х?|(?:хе){2,}х?|(?:ah){2,}a?|(?:ha){2,}h?|(?:he){2,}h?)(?=$|[^\p{L}\p{M}\p{N}])/iu.test(laughterText) ? 1 : 0,
+    laughterEmojiMessages: /[😂🤣]/u.test(text) ? 1 : 0,
     questions: /[?？]/u.test(text) ? 1 : 0,
     links: hasLink(message, text) ? 1 : 0,
     forwards: message.forwarded_from != null && message.forwarded_from !== '' ? 1 : 0,
@@ -222,7 +230,7 @@ function measure(message, lexicalCounts = null, segmenter = null) {
 function makeParticipant(key, name) {
   return {
     key, name, messages: 0, words: 0, characters: 0, questions: 0, links: 0, forwards: 0,
-    replies: 0, reactionsReceived: 0, edited: 0,
+    replies: 0, reactionsReceived: 0, edited: 0, laughterMessages: 0, laughterEmojiMessages: 0, repliesReceived: 0, distinctReplyPartners: 0,
     media: Object.fromEntries(MEDIA.map((type) => [type, 0])),
     voiceSeconds: 0, videoSeconds: 0, activeDays: 0, nightMessages: 0,
     starts: 0, turns: 0, response: responseSummary([]), unansweredSessions: 0,
@@ -237,6 +245,8 @@ function groupSessions(messages, hours, collectResponses = false) {
   const threshold = hours * 3600000;
   let current = null, previous = null;
   for (const message of messages) {
+    if (!Object.hasOwn(turns, message.key)) turns[message.key] = 0;
+    if (!Object.hasOwn(responses, message.key)) responses[message.key] = [];
     if (!current || message.epoch - previous.epoch >= threshold) {
       current = { date: message.date, starter: message.key, messages: 0, start: message.epoch, end: message.epoch, seen: new Set(), lastKey: message.key };
       groups.push(current);
@@ -248,7 +258,7 @@ function groupSessions(messages, hours, collectResponses = false) {
         responses[message.key].push(seconds);
         const month = message.date.slice(0, 7);
         if (!monthlyResponses.has(month)) monthlyResponses.set(month, { a: [], b: [] });
-        monthlyResponses.get(month)[message.key].push(seconds);
+        (monthlyResponses.get(month)[message.key] ||= []).push(seconds);
       }
     }
     current.messages++;
@@ -284,12 +294,23 @@ function trendFor(daily) {
   };
 }
 
-/** Analyze one Telegram Desktop personal_chat JSON. Optional lexical aggregates require explicit opt-in. */
+// Telegram may explicitly point to another peer. A numeric ID and a typed peer must
+// both match this export; matching message numbers in different chats are unrelated.
+function sameReplyPeer(peer, chatId, chatType) {
+  if (peer === undefined || peer === null || peer === '') return true;
+  if (!['string', 'number'].includes(typeof peer) || chatId == null) return false;
+  const id = String(chatId);
+  const expected = chatType === 'private_group' ? 'chat' : chatType === 'personal_chat' ? 'user' : 'channel';
+  return String(peer) === id || String(peer) === `${expected}${id}`;
+}
+
+/** Analyze one Telegram Desktop personal or group chat. Lexical aggregates are opt-in. */
 export function analyzeExport(input, settings = {}, onParticipants = null) {
   const { options, formatter } = validateOptions(settings);
-  if (!input || typeof input !== 'object' || Array.isArray(input) || input.type !== 'personal_chat' || !Array.isArray(input.messages)) {
-    throw new Error('Нужен JSON одной личной переписки Telegram (type: personal_chat, messages). Группы и полный архив аккаунта пока не поддерживаются.');
+  if (!input || typeof input !== 'object' || Array.isArray(input) || !['personal_chat', 'private_group', 'private_supergroup', 'public_supergroup'].includes(input.type) || !Array.isArray(input.messages)) {
+    throw new Error('Нужен JSON одной личной переписки или группы Telegram с массивом messages. Каналы и полный архив аккаунта не поддерживаются.');
   }
+  const isGroup = input.type !== 'personal_chat';
   const quality = { totalRecords: input.messages.length, validMessages: 0, serviceMessages: 0, invalidMessages: 0, duplicates: 0, outsideRange: 0, warnings: [] };
   const normalized = [];
   const lexicalByIdentity = options.includeLexicon ? new Map() : null;
@@ -336,30 +357,33 @@ export function analyzeExport(input, settings = {}, onParticipants = null) {
       if (!lexicalByIdentity.has(identity)) lexicalByIdentity.set(identity, { words: new Map(), emojis: new Map() });
       lexicalCounts = lexicalByIdentity.get(identity);
     }
-    normalized.push({ epoch, date: calendar.date, hour: calendar.hour, identity, name, index, counts: measure(raw, lexicalCounts, segmenter) });
+    normalized.push({ epoch, date: calendar.date, hour: calendar.hour, identity, name, index, messageId, replyId: ['string', 'number'].includes(typeof raw.reply_to_message_id) ? String(raw.reply_to_message_id) : null, samePeer: sameReplyPeer(raw.reply_to_peer_id, input.id, input.type), counts: measure(raw, lexicalCounts, segmenter) });
     quality.validMessages++;
   }
   normalized.sort((a, b) => a.epoch - b.epoch || a.index - b.index);
   const identityMap = new Map();
   const participants = [];
   const profiles = [];
+  const profileMap = new Map();
   for (const message of normalized) {
     if (!identityMap.has(message.identity)) {
-      if (participants.length === 2) throw new Error('В выгрузке больше двух авторов. Выберите личную переписку 1:1; для групп анализ пока недоступен.');
-      const key = participants.length ? 'b' : 'a';
+      if (!isGroup && participants.length === 2) throw new Error('В личной переписке больше двух авторов. Проверьте тип экспорта; для группы нужен тип private_group, private_supergroup или public_supergroup.');
+      const key = participants.length < 2 ? ['a', 'b'][participants.length] : `p${participants.length + 1}`;
       identityMap.set(message.identity, key);
       profiles.push({key,sourceId:message.identity.startsWith('id:')?message.identity.slice(3):null,sourceName:message.name,lastAt:message.epoch,lastInExport:false});
-      participants.push(makeParticipant(key, options.anonymize ? `Участник ${key.toUpperCase()}` : message.name || `Участник ${key.toUpperCase()}`));
+      profileMap.set(key, profiles.at(-1));
+      const placeholder = isGroup ? `Участник ${participants.length + 1}` : `Участник ${key.toUpperCase()}`;
+      participants.push(makeParticipant(key, options.anonymize ? placeholder : message.name || placeholder));
     }
     message.key = identityMap.get(message.identity);
-    const profile = profiles[message.key === 'a' ? 0 : 1];
+    const profile = profileMap.get(message.key);
     if (message.name) profile.sourceName = message.name;
     profile.lastAt = message.epoch;
   }
-  if (normalized.length) profiles.find(p => p.key === normalized.at(-1).key).lastInExport = true;
-  for (const profile of profiles) {
-    const participant = participants.find(p => p.key === profile.key);
-    if (!options.anonymize) participant.name = options.participantNames[profile.key]?.trim() || profile.sourceName || `Собеседник ${profile.key === 'a' ? 1 : 2}`;
+  if (normalized.length) profileMap.get(normalized.at(-1).key).lastInExport = true;
+  for (let index = 0; index < profiles.length; index++) {
+    const profile = profiles[index], participant = participants[index];
+    if (!options.anonymize) participant.name = options.participantNames[profile.key]?.trim() || profile.sourceName || `Участник ${index + 1}`;
   }
   // Identity metadata is local UI-only: never include source IDs in report aggregates.
   if (typeof onParticipants === 'function') onParticipants(profiles);
@@ -380,64 +404,105 @@ export function analyzeExport(input, settings = {}, onParticipants = null) {
   const dayMap = new Map();
   for (let n = 0; n < dayCount; n++) {
     const date = new Date(parseDay(first) + n * DAY).toISOString().slice(0, 10);
-    const row = { date, total: 0, a: 0, b: 0, avg7: null, startsA: 0, startsB: 0, wordsA: 0, wordsB: 0 };
+    const row = { date, total: 0, a: 0, b: 0, avg7: null, startsA: 0, startsB: 0, wordsA: 0, wordsB: 0, byParticipant: {}, uniqueAuthors: 0, totalLaughter: 0 };
     daily.push(row);
     dayMap.set(date, row);
   }
-  const heatmap = Array.from({ length: 168 }, (_, index) => ({ day: Math.floor(index / 24), hour: index % 24, a: 0, b: 0, total: 0 }));
+  const heatmap = Array.from({ length: 168 }, (_, index) => ({ day: Math.floor(index / 24), hour: index % 24, a: 0, b: 0, total: 0, ...(isGroup ? { byParticipant: {} } : {}) }));
   const participantMap = new Map(participants.map((participant) => [participant.key, participant]));
-  const activeSets = { a: new Set(), b: new Set() };
+  const activeSets = Object.fromEntries(participants.map(p => [p.key, new Set()]));
+  const dailyParticipant = (row, key) => (row.byParticipant[key] ||= { messages: 0, words: 0, starts: 0, laughter: 0 });
   for (const message of filtered) {
     const participant = participantMap.get(message.key);
     const row = dayMap.get(message.date);
-    row.total++; row[message.key]++;
-    row[message.key === 'a' ? 'wordsA' : 'wordsB'] += message.counts.words;
+    row.total++;
+    if (message.key === 'a' || message.key === 'b') { row[message.key]++; row[message.key === 'a' ? 'wordsA' : 'wordsB'] += message.counts.words; }
+    const byAuthor = dailyParticipant(row, message.key);
+    byAuthor.messages++; byAuthor.words += message.counts.words; byAuthor.laughter += message.counts.laughterMessages;
+    row.totalLaughter += message.counts.laughterMessages;
     participant.messages++;
-    for (const field of ['words', 'characters', 'questions', 'links', 'forwards', 'replies', 'reactionsReceived', 'edited', 'voiceSeconds', 'videoSeconds']) participant[field] += message.counts[field];
+    for (const field of ['words', 'characters', 'questions', 'links', 'forwards', 'replies', 'reactionsReceived', 'edited', 'voiceSeconds', 'videoSeconds', 'laughterMessages', 'laughterEmojiMessages']) participant[field] += message.counts[field];
     if (message.counts.media) participant.media[message.counts.media]++;
     if (message.hour < 6) participant.nightMessages++;
     activeSets[message.key].add(message.date);
     const weekday = (new Date(parseDay(message.date)).getUTCDay() + 6) % 7;
     const cell = heatmap[weekday * 24 + message.hour];
-    cell.total++; cell[message.key]++;
+    cell.total++;
+    if (message.key === 'a' || message.key === 'b') cell[message.key]++;
+    if (isGroup) cell.byParticipant[message.key] = (cell.byParticipant[message.key] || 0) + 1;
   }
   let rollingTotal = 0;
   for (let index = 0; index < daily.length; index++) {
+    daily[index].uniqueAuthors = Object.keys(daily[index].byParticipant).length;
     rollingTotal += daily[index].total;
     if (index >= 7) rollingTotal -= daily[index - 7].total;
     if (index >= 6) daily[index].avg7 = round(rollingTotal / 7);
   }
-  const grouping = groupSessions(filtered, options.sessionGapHours, true);
+  const grouping = groupSessions(filtered, options.sessionGapHours, !isGroup);
   const { groups, responses, monthlyResponses, turns } = grouping;
   for (let index = 1; index < groups.length; index++) {
     const group = groups[index];
     participantMap.get(group.starter).starts++;
-    dayMap.get(group.date)[group.starter === 'a' ? 'startsA' : 'startsB']++;
+    const day = dayMap.get(group.date);
+    if (group.starter === 'a' || group.starter === 'b') day[group.starter === 'a' ? 'startsA' : 'startsB']++;
+    dailyParticipant(day, group.starter).starts++;
   }
   // Only completed, two-sided sessions have an observable final turn with no further reply.
   // The last exported session is right-censored; one-sided starts are not unanswered replies.
-  for (let index = 0; index < groups.length - 1; index++) {
+  for (let index = 0; !isGroup && index < groups.length - 1; index++) {
     if (groups[index].seen.size === 2) participantMap.get(groups[index].lastKey).unansweredSessions++;
   }
+  const replyCoverage = { total: 0, resolved: 0, unresolved: 0, self: 0 };
+  const replyEdges = new Map(), replyPartners = new Map();
+  const messageById = new Map(filtered.filter(message => message.messageId !== null).map(message => [message.messageId, message]));
+  for (const message of filtered) {
+    if (!message.counts.replies) continue;
+    replyCoverage.total++;
+    const target = message.samePeer && message.replyId !== null ? messageById.get(message.replyId) : null;
+    if (!target || target === message || target.epoch > message.epoch || (target.epoch === message.epoch && target.index > message.index)) { replyCoverage.unresolved++; continue; }
+    if (target.key === message.key) { replyCoverage.self++; continue; }
+    replyCoverage.resolved++;
+    participantMap.get(target.key).repliesReceived++;
+    if (!replyPartners.has(message.key)) replyPartners.set(message.key, new Set());
+    if (!replyPartners.has(target.key)) replyPartners.set(target.key, new Set());
+    replyPartners.get(message.key).add(target.key);
+    replyPartners.get(target.key).add(message.key);
+    const edgeKey = `${message.key}:${target.key}`;
+    if (!replyEdges.has(edgeKey)) replyEdges.set(edgeKey, { from: message.key, to: target.key, count: 0 });
+    replyEdges.get(edgeKey).count++;
+    if (isGroup) {
+      const seconds = (message.epoch - target.epoch) / 1000;
+      (responses[message.key] ||= []).push(seconds);
+      const month = message.date.slice(0, 7);
+      if (!monthlyResponses.has(month)) monthlyResponses.set(month, { a: [], b: [] });
+      (monthlyResponses.get(month)[message.key] ||= []).push(seconds);
+    }
+  }
   for (const participant of participants) {
+    participant.distinctReplyPartners = replyPartners.get(participant.key)?.size || 0;
     participant.activeDays = activeSets[participant.key].size;
-    participant.turns = turns[participant.key];
-    participant.response = responseSummary(responses[participant.key]);
+    participant.turns = turns[participant.key] || 0;
+    participant.response = responseSummary(responses[participant.key] || []);
     participant.voiceSeconds = round(participant.voiceSeconds);
     participant.videoSeconds = round(participant.videoSeconds);
   }
-  const sessions = groups.map((group, index) => ({ date: group.date, starter: group.starter, messages: group.messages, durationMinutes: round((group.end - group.start) / 60000), twoSided: group.seen.size === 2, censored: index === 0 || index === groups.length - 1 }));
+  const sessions = groups.map((group, index) => ({ date: group.date, starter: group.starter, messages: group.messages, durationMinutes: round((group.end - group.start) / 60000), twoSided: group.seen.size === 2, participantCount: group.seen.size, multiAuthor: group.seen.size >= 2, censored: index === 0 || index === groups.length - 1 }));
   const monthlyMap = new Map();
   for (const day of daily) {
     const month = day.date.slice(0, 7);
-    if (!monthlyMap.has(month)) monthlyMap.set(month, { month, total: 0, a: 0, b: 0, startsA: 0, startsB: 0, responseA: null, responseB: null });
+    if (!monthlyMap.has(month)) monthlyMap.set(month, { month, total: 0, a: 0, b: 0, startsA: 0, startsB: 0, responseA: null, responseB: null, ...(isGroup ? { byParticipant: {} } : {}) });
     const row = monthlyMap.get(month);
     for (const field of ['total', 'a', 'b', 'startsA', 'startsB']) row[field] += day[field];
+    if (isGroup) for (const [key, counts] of Object.entries(day.byParticipant)) {
+      const byAuthor = dailyParticipant(row, key);
+      for (const field of ['messages', 'words', 'starts', 'laughter']) byAuthor[field] += counts[field];
+    }
   }
   for (const [month, values] of monthlyResponses) {
     const row = monthlyMap.get(month);
     row.responseA = quantile(values.a, 0.5);
     row.responseB = quantile(values.b, 0.5);
+    if (isGroup) for (const [key, seconds] of Object.entries(values)) if (row.byParticipant[key]) row.byParticipant[key].responseMedianSeconds = quantile(seconds, 0.5);
   }
   let longestStreakDays = 0, streak = 0, longestSilenceHours = 0;
   for (const day of daily) {
@@ -450,19 +515,30 @@ export function analyzeExport(input, settings = {}, onParticipants = null) {
   const messages = filtered.length;
   const a = participantMap.get('a')?.messages || 0, b = participantMap.get('b')?.messages || 0;
   const summary = {
-    messages, days: daily.length, activeDays, activeDayPct: percent(activeDays, daily.length),
+    messages, totalParticipants: participants.length, activeParticipants: participants.filter(p => p.messages > 0).length,
+    laughterMessages: participants.reduce((sum, p) => sum + p.laughterMessages, 0),
+    explicitReplies: replyCoverage.total, resolvedReplies: replyCoverage.resolved, unresolvedReplies: replyCoverage.unresolved,
+    days: daily.length, activeDays, activeDayPct: percent(activeDays, daily.length),
     messagesPerActiveDay: activeDays ? round(messages / activeDays) : 0,
     sessions: sessions.length, eligibleStarts: Math.max(0, sessions.length - 1),
     twoSidedSessions, twoSidedSessionPct: percent(twoSidedSessions, sessions.length),
     medianSessionMinutes: quantile(groups.map((group) => (group.end - group.start) / 60000), 0.5),
     longestStreakDays, longestSilenceHours: round(longestSilenceHours),
-    mutualityScore: messages ? round(100 * (1 - Math.abs(a - b) / messages)) : 0,
+    mutualityScore: isGroup ? null : messages ? round(100 * (1 - Math.abs(a - b) / messages)) : 0,
     exchangeScore: percent(twoSidedSessions, sessions.length), continuityScore: percent(activeDays, daily.length),
   };
+  const groupData = isGroup ? {
+    replyEdges: [...replyEdges.values()].sort((left, right) => right.count - left.count || left.from.localeCompare(right.from) || left.to.localeCompare(right.to)),
+    replyCoverage,
+    sessions: { multiAuthor: groups.filter(group => group.seen.size >= 2).length, count: groups.length, medianAuthors: quantile(groups.map(group => group.seen.size), 0.5), maxAuthors: groups.reduce((max, group) => Math.max(max, group.seen.size), 0) },
+    activeAuthorsPerDay: { mean: activeDays ? round(daily.reduce((sum, day) => sum + day.uniqueAuthors, 0) / activeDays) : 0, max: daily.reduce((max, day) => Math.max(max, day.uniqueAuthors), 0) },
+  } : null;
   const sensitivity = [...new Set([2, 6, 12, 24, options.sessionGapHours])].sort((a, b) => a - b).map((hours) => {
     const alternative = hours === options.sessionGapHours ? groups : groupSessions(filtered, hours).groups;
     const starts = alternative.slice(1);
-    return { hours, eligibleStarts: starts.length, a: starts.filter((group) => group.starter === 'a').length, b: starts.filter((group) => group.starter === 'b').length, twoSidedPct: percent(alternative.filter((group) => group.seen.size === 2).length, alternative.length) };
+    const byParticipant = {};
+    if (isGroup) for (const group of starts) byParticipant[group.starter] = (byParticipant[group.starter] || 0) + 1;
+    return { ...(isGroup ? { byParticipant, multiAuthorPct: percent(alternative.filter(group => group.seen.size >= 2).length, alternative.length) } : {}), hours, eligibleStarts: starts.length, a: starts.filter((group) => group.starter === 'a').length, b: starts.filter((group) => group.starter === 'b').length, twoSidedPct: percent(alternative.filter((group) => group.seen.size === 2).length, alternative.length) };
   });
   const trend = trendFor(daily);
   if (fallbackDates) quality.warnings.push(`Сообщения без Unix-времени: ${fallbackDates}. Для дат без смещения предполагается ${options.timezone === 'export' ? 'UTC; реальная длительность пауз при смене часового пояса неизвестна' : `зона ${options.timezone}; в повторяющемся осеннем часу выбрано первое вхождение`}.`);
@@ -474,6 +550,10 @@ export function analyzeExport(input, settings = {}, onParticipants = null) {
   if (quality.outsideRange) quality.warnings.push(`Вне выбранного периода: ${quality.outsideRange} сообщений.`);
   if (!messages) quality.warnings.push('В выбранном периоде нет сообщений.');
   quality.warnings.push('Крайние дни и сеансы могут быть неполными. Удалённые и невыгруженные сообщения восстановить нельзя.');
+  if (isGroup) {
+    quality.warnings.push('Участники — авторы доступных сообщений, а не полный состав группы: молчащие участники в экспорте не наблюдаются.');
+    if (replyCoverage.unresolved) quality.warnings.push(`Не удалось связать явные ответы: ${replyCoverage.unresolved}. Цель отсутствует в выбранном периоде, недоступна, относится к другому чату или имеет некорректный порядок времени.`);
+  }
   const insights = [];
   if (messages) {
     const peak = daily.reduce((best, day) => day.total > best.total ? day : best, daily[0]);
@@ -486,7 +566,7 @@ export function analyzeExport(input, settings = {}, onParticipants = null) {
     insights.push({ tone: 'neutral', title: 'В периоде нет сообщений', body: `В пределах доступного экспорта выбрано календарных дней: ${summary.days}. Для этого периода нет наблюдаемого пика активности.` });
   }
   if (sessions.length) {
-    const starterCounts = participants.map((participant) => `${participantMap.get(participant.key).name}: ${participant.starts}`).join('; ');
+    const starterCounts = [...participants].sort((a, b) => b.starts - a.starts).slice(0, isGroup ? 5 : 2).map(participant => `${participant.name}: ${participant.starts}`).join('; ');
     insights.push({
       tone: 'neutral', title: 'Кто начинал после паузы',
       body: `${starterCounts}. Всего учитываемых начал: ${summary.eligibleStarts}, после паузы от ${options.sessionGapHours} ч. Первый сеанс периода исключён.`,
@@ -505,8 +585,9 @@ export function analyzeExport(input, settings = {}, onParticipants = null) {
   }
   return {
     schemaVersion: 1,
-    meta: { title: options.anonymize ? 'Личная переписка' : participants.map(p => p.name).join(' и ') || 'Личная переписка', generatedAt: new Date().toISOString(), startDate: first, endDate: last, timezone: options.timezone, sessionGapHours: options.sessionGapHours, anonymize: options.anonymize, includeLexicon: options.includeLexicon, partialBoundaryDays: true },
+    meta: { chatType: isGroup ? 'group' : 'personal', title: isGroup ? (options.anonymize ? 'Групповая переписка' : typeof input.name === 'string' && input.name.trim() ? input.name.trim() : 'Групповая переписка') : options.anonymize ? 'Личная переписка' : participants.map(p => p.name).join(' и ') || 'Личная переписка', generatedAt: new Date().toISOString(), startDate: first, endDate: last, timezone: options.timezone, sessionGapHours: options.sessionGapHours, anonymize: options.anonymize, includeLexicon: options.includeLexicon, partialBoundaryDays: true },
     quality, participants, summary, daily, monthly: [...monthlyMap.values()], heatmap, sessions, sensitivity, trend, insights,
-    ...(options.includeLexicon ? { lexicon: lexiconResult(lexicalByIdentity, identityMap) } : {}),
+    ...(isGroup ? { group: groupData } : {}),
+    ...(options.includeLexicon ? { lexicon: lexiconResult(lexicalByIdentity, identityMap, isGroup) } : {}),
   };
 }
