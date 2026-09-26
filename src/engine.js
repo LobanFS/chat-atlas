@@ -6,6 +6,7 @@ export const DEFAULT_OPTIONS = Object.freeze({
   endDate: '',
   anonymize: true,
   includeLexicon: false,
+  participantNames: Object.freeze({}),
 });
 
 const DAY = 86400000;
@@ -157,6 +158,7 @@ function validateOptions(input) {
   if (options.startDate && options.endDate && (parseDay(options.endDate) - parseDay(options.startDate)) / DAY + 1 > MAX_DAYS) {
     throw new Error('Слишком длинный период: выберите не больше 100 лет.');
   }
+  if (!options.participantNames || typeof options.participantNames !== 'object' || Array.isArray(options.participantNames) || Object.entries(options.participantNames).some(([key,value]) => !['a','b'].includes(key) || typeof value !== 'string' || value.length > 80)) throw new Error('Подписи участников: строки до 80 символов для a и b.');
   return { options, formatter };
 }
 
@@ -283,7 +285,7 @@ function trendFor(daily) {
 }
 
 /** Analyze one Telegram Desktop personal_chat JSON. Optional lexical aggregates require explicit opt-in. */
-export function analyzeExport(input, settings = {}) {
+export function analyzeExport(input, settings = {}, onParticipants = null) {
   const { options, formatter } = validateOptions(settings);
   if (!input || typeof input !== 'object' || Array.isArray(input) || input.type !== 'personal_chat' || !Array.isArray(input.messages)) {
     throw new Error('Нужен JSON одной личной переписки Telegram (type: personal_chat, messages). Группы и полный архив аккаунта пока не поддерживаются.');
@@ -340,15 +342,28 @@ export function analyzeExport(input, settings = {}) {
   normalized.sort((a, b) => a.epoch - b.epoch || a.index - b.index);
   const identityMap = new Map();
   const participants = [];
+  const profiles = [];
   for (const message of normalized) {
     if (!identityMap.has(message.identity)) {
       if (participants.length === 2) throw new Error('В выгрузке больше двух авторов. Выберите личную переписку 1:1; для групп анализ пока недоступен.');
       const key = participants.length ? 'b' : 'a';
       identityMap.set(message.identity, key);
+      profiles.push({key,sourceId:message.identity.startsWith('id:')?message.identity.slice(3):null,sourceName:message.name,lastAt:message.epoch,lastInExport:false});
       participants.push(makeParticipant(key, options.anonymize ? `Участник ${key.toUpperCase()}` : message.name || `Участник ${key.toUpperCase()}`));
     }
     message.key = identityMap.get(message.identity);
+    const profile = profiles[message.key === 'a' ? 0 : 1];
+    if (message.name) profile.sourceName = message.name;
+    profile.lastAt = message.epoch;
   }
+  if (normalized.length) profiles.find(p => p.key === normalized.at(-1).key).lastInExport = true;
+  for (const profile of profiles) {
+    const participant = participants.find(p => p.key === profile.key);
+    if (!options.anonymize) participant.name = options.participantNames[profile.key]?.trim() || profile.sourceName || `Собеседник ${profile.key === 'a' ? 1 : 2}`;
+  }
+  // Identity metadata is local UI-only: never include source IDs in report aggregates.
+  if (typeof onParticipants === 'function') onParticipants(profiles);
+
   const filtered = normalized.filter((message) => (!options.startDate || message.date >= options.startDate) && (!options.endDate || message.date <= options.endDate));
   quality.outsideRange = normalized.length - filtered.length;
   let first = '', last = '';
@@ -365,7 +380,7 @@ export function analyzeExport(input, settings = {}) {
   const dayMap = new Map();
   for (let n = 0; n < dayCount; n++) {
     const date = new Date(parseDay(first) + n * DAY).toISOString().slice(0, 10);
-    const row = { date, total: 0, a: 0, b: 0, avg7: null, startsA: 0, startsB: 0 };
+    const row = { date, total: 0, a: 0, b: 0, avg7: null, startsA: 0, startsB: 0, wordsA: 0, wordsB: 0 };
     daily.push(row);
     dayMap.set(date, row);
   }
@@ -376,6 +391,7 @@ export function analyzeExport(input, settings = {}) {
     const participant = participantMap.get(message.key);
     const row = dayMap.get(message.date);
     row.total++; row[message.key]++;
+    row[message.key === 'a' ? 'wordsA' : 'wordsB'] += message.counts.words;
     participant.messages++;
     for (const field of ['words', 'characters', 'questions', 'links', 'forwards', 'replies', 'reactionsReceived', 'edited', 'voiceSeconds', 'videoSeconds']) participant[field] += message.counts[field];
     if (message.counts.media) participant.media[message.counts.media]++;
@@ -489,7 +505,7 @@ export function analyzeExport(input, settings = {}) {
   }
   return {
     schemaVersion: 1,
-    meta: { title: options.anonymize ? 'Личная переписка' : typeof input.name === 'string' && input.name.trim() ? input.name.trim() : 'Личная переписка', generatedAt: new Date().toISOString(), startDate: first, endDate: last, timezone: options.timezone, sessionGapHours: options.sessionGapHours, anonymize: options.anonymize, includeLexicon: options.includeLexicon, partialBoundaryDays: true },
+    meta: { title: options.anonymize ? 'Личная переписка' : participants.map(p => p.name).join(' и ') || 'Личная переписка', generatedAt: new Date().toISOString(), startDate: first, endDate: last, timezone: options.timezone, sessionGapHours: options.sessionGapHours, anonymize: options.anonymize, includeLexicon: options.includeLexicon, partialBoundaryDays: true },
     quality, participants, summary, daily, monthly: [...monthlyMap.values()], heatmap, sessions, sensitivity, trend, insights,
     ...(options.includeLexicon ? { lexicon: lexiconResult(lexicalByIdentity, identityMap) } : {}),
   };

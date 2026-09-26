@@ -152,7 +152,7 @@ test('empty and one-speaker data produce useful reports without numeric artifact
     for (const mode of ['full', 'overview', 'rhythm', 'dialogue']) {
       const html = renderReport(data, { mode });
       assert.doesNotMatch(html, /NaN|Infinity|undefined/);
-      assert.match(html, /Нужны сообщения двух участников/);
+      assert.doesNotMatch(html, /class="index-card"/);
       assert.match(html, /id="method"/);
     }
   }
@@ -164,9 +164,8 @@ test('a zero trend baseline is described without an infinite percentage', () => 
   const data = fixture();
   data.trend = { available: true, previousMean: 0, currentMean: 4, changePct: null, zScore: null, direction: 'up', baselineDays: 28, comparisonDays: 7, excludedBoundaryDays: 2 };
   const html = renderReport(data, { mode: 'rhythm' });
-  assert.match(html, /Новый период активности/);
-  assert.match(html, /последние 7 дней/);
-  assert.match(html, /предыдущие 28 дней/);
+  assert.match(html, /Недостаточно полных дней/); // daily aggregates are authoritative, not an inconsistent supplied trend cache
+  assert.match(html, /Периоды сравнения/);
   assert.doesNotMatch(html, /NaN|Infinity|null%/);
 });
 

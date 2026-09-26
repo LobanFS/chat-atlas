@@ -58,7 +58,7 @@ test('CLI produces a single portable anonymized HTML without copying source mess
   assert.match(html, /id="rhythm"/);
   assert.match(html, /Участник A/);
   for (const privateValue of [ALICE, BOB, TOKEN, 'PRIVATE_SYNTHETIC_CHAT_TITLE']) assert.ok(!html.includes(privateValue), `${privateValue} should not appear in anonymized aggregate report`);
-  assert.doesNotMatch(html, /<script\b|<link\b[^>]*href="https?:|\bsrc="https?:/i);
+  assert.doesNotMatch(html, /<script\b[^>]*src=|<link\b[^>]*href="https?:|\bsrc="https?:/i);
   assert.deepEqual((await readdir(dir)).sort(), ['input.json', 'output.html']);
   assert.equal(await readFile(input, 'utf8'), content);
 });

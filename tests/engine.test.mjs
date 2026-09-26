@@ -97,7 +97,7 @@ test('sorts events stably, treats equal timestamps as zero-latency replies and k
     message(3, 'B', at(60)),
   ], { anonymize: false });
   assert.equal(result.participants.length, 2);
-  assert.equal(result.participants[0].name, 'old-name');
+  assert.equal(result.participants[0].name, 'new-name');
   assert.equal(result.participants[0].messages, 2);
   assert.equal(result.participants[1].response.medianSeconds, 0);
   assert.equal(result.participants[1].response.under5minPct, 100);
@@ -306,7 +306,7 @@ test('anonymized aggregate output retains no message text, identifiers, names, p
   assert.equal(result.participants[0].name, 'Участник A');
   const named = analyzeExport(raw, { anonymize: false });
   assert.equal(named.participants[0].name, 'SECRET_NAME');
-  assert.equal(named.meta.title, 'SECRET_TITLE');
+  assert.equal(named.meta.title, 'SECRET_NAME');
   assert.ok(!JSON.stringify(named).includes('SECRET_CHAT_TEXT'));
   assert.ok(!JSON.stringify(named).includes('SECRET_FROM_ID'));
 });

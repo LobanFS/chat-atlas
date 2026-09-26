@@ -89,7 +89,9 @@ async function main(args) {
   const data = analyzeExport(input, config.options);
   const body = renderReport(data, { mode: config.mode });
   const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
-  const html = renderDocument(data, body, styles, { mode: config.mode });
+  const runtimeSource=await readFile(new URL('../src/explore.js',import.meta.url),'utf8');
+  const runtime=runtimeSource.replace(/^export\s+/gm,'')+'\nbindExplorer(document.getElementById("portable-report"),JSON.parse(document.getElementById("report-data").textContent));';
+  const html = renderDocument(data, body, styles, { mode: config.mode, runtime });
   // Check again after analysis; wx also prevents a newly created file from being overwritten.
   await assertSafeOutput(inputPath, outputPath, inputStat, config.force);
   await writeFile(outputPath, html, { encoding: 'utf8', flag: config.force ? 'w' : 'wx' });

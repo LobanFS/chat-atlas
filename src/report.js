@@ -1,3 +1,4 @@
+import { renderExplorer } from './explore.js';
 const COLORS = { a: '#147d78', b: '#6760d5', ink: '#26364b', muted: '#66788b', line: '#e7edf1' };
 const MEDIA = [
   ['photo', 'Фотографии'], ['voice_message', 'Голосовые'], ['video_message', 'Видеокружки'],
@@ -61,80 +62,13 @@ function stat(value, label, note = '') {
 }
 
 function overview(data) {
-  const s = data.summary || {};
-  const participants = data.participants || [];
-  const hasBoth = participants.length === 2;
-  const indices = [
-    { label: 'Равномерность сообщений', value: hasBoth ? s.mutualityScore : null, note: hasBoth ? '100 — одинаковое число сообщений. Объём, а не чувства.' : 'Нужны сообщения двух участников.', formula: '100 × (1 − |A − B| / (A + B))' },
-    { label: 'Двусторонние сессии', value: s.exchangeScore, note: 'Доля сессий, в которых написали оба участника.', formula: 'Сессии с двумя авторами / все сессии × 100' },
-    { label: 'Активные дни', value: s.continuityScore, note: 'Доля календарных дней хотя бы с одним сообщением.', formula: 'Активные дни / все дни периода × 100' },
-  ];
-  return `<section class="report-section" id="overview">${sectionHead('01 / Общая картина', 'Ваш диалог в цифрах', 'Наблюдения о переписке. Без догадок о людях.')}
-    <div class="stat-grid">${stat(int(s.messages), 'сообщений', `${int(s.days)} календарных дней в периоде`)}${stat(int(s.activeDays), 'дней на связи', `${pct(s.activeDayPct)} от периода`)}${stat(dec(s.messagesPerActiveDay), 'сообщений в активный день', 'Дни без сообщений не входят в среднее')}${stat(int(s.sessions), 'сессий общения', `Новая сессия после паузы от ${dec(data.meta?.sessionGapHours)} ч`)}</div>
-    <div class="index-grid">${indices.map((item, i) => `<article class="index-card"><div class="index-top"><span class="index-label">${esc(item.label)}</span><span class="index-number">0${i + 1}</span></div><p class="index-value">${finite(item.value) ? int(item.value) : '—'}<span> / 100</span></p><div class="index-meter" aria-hidden="true"><span style="width:${clamp(item.value)}%"></span></div><p class="stat-note">${esc(item.note)}</p><details class="index-formula"><summary>Как считается</summary><p>${esc(item.formula)}</p></details></article>`).join('')}</div>
-    <p class="panel-note index-disclaimer">Эти индексы описывают числа и не измеряют взаимную симпатию, качество отношений или вовлечённость человека.</p>
-    ${(data.insights || []).length ? `<div class="insight-grid">${data.insights.map((item) => `<article class="insight-card tone-${['neutral', 'positive', 'attention'].includes(item.tone) ? item.tone : 'neutral'}"><h3>${esc(item.title)}</h3><p>${esc(item.body)}</p></article>`).join('')}</div>` : ''}
-  </section>`;
+  const summary=data.summary||{},people=data.participants||[];
+  return `<section class="report-section" id="overview">${sectionHead('01 / Кто и сколько', people.length===2?'Два человека. Один диалог.':'Ваш диалог в цифрах', 'Вклад каждого — в сообщениях, словах и репликах.')}<div class="overview-strip"><span><strong>${int(summary.messages)}</strong> сообщений всего</span><span><strong>${int(summary.days)}</strong> дней в периоде</span><span><strong>${int(summary.activeDays)}</strong> дней с перепиской</span></div><div class="people-grid">${people.map(p=>`<article class="person-card person-card-${p.key}"><div class="person-top"><h3>${personName(p)}</h3><span>${pct(ratio(p.messages,summary.messages))} переписки</span></div><p class="person-volume">${int(p.messages)}<span>сообщений</span></p><div class="person-share"><span style="width:${clamp(ratio(p.messages,summary.messages))}%"></span></div><div class="person-facts"><div><b>${int(p.words)}</b><span>слов</span></div><div><b>${int(p.turns)}</b><span>реплик</span></div><div><b>${int(p.starts)}</b><span>начал диалога</span></div><div><b>${duration(p.response?.medianSeconds)}</b><span>медиана ответа</span></div></div></article>`).join('')||empty('В выбранном периоде нет участников.')}</div><p class="panel-note">Начало диалога — первое сообщение после паузы от ${dec(data.meta?.sessionGapHours)} ч. Реплика объединяет сообщения одного автора подряд. Медиана ответа — только внутри сессий.</p>${(data.insights||[]).length?`<div class="insight-grid">${data.insights.slice(0,2).map(item=>`<article class="insight-card tone-${['neutral','positive','attention'].includes(item.tone)?item.tone:'neutral'}"><h3>${esc(item.title)}</h3><p>${esc(item.body)}</p></article>`).join('')}</div>`:''}</section>`;
 }
 
-function chartBounds(maxValue) {
-  if (!(maxValue > 0)) return 4;
-  const power = 10 ** Math.floor(Math.log10(maxValue));
-  const normalized = maxValue / power;
-  const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 4 ? 4 : normalized <= 5 ? 5 : normalized <= 8 ? 8 : 10;
-  return nice * power;
-}
-
-function dailyChart(data) {
-  const daily = data.daily || [];
-  if (!daily.length) return empty('В выбранном периоде пока нет данных для графика.');
-  const width = 1060, height = 330, left = 60, right = 20, top = 25, bottom = 49;
-  const plotW = width - left - right, plotH = height - top - bottom;
-  const max = chartBounds(Math.max(...daily.map((d) => Math.max(num(d.total), num(d.avg7)))));
-  const step = plotW / daily.length;
-  const y = (value) => top + plotH - num(value) / max * plotH;
-  const x = (i) => left + (i + 0.5) * step;
-  const barW = Math.max(0.35, step * 0.79);
-  const grid = Array.from({ length: 5 }, (_, i) => {
-    const value = max * i / 4;
-    return `<line x1="${left}" y1="${y(value)}" x2="${width - right}" y2="${y(value)}" stroke="${COLORS.line}"/><text x="${left - 12}" y="${y(value) + 4}" text-anchor="end" fill="${COLORS.muted}" font-size="12">${esc(dec(value))}</text>`;
-  }).join('');
-  let pathA = '', pathB = '', line = '', open = false;
-  daily.forEach((d, i) => {
-    const px = x(i) - barW / 2;
-    const a = num(d.a), b = num(d.b);
-    if (a > 0) pathA += `M${px.toFixed(2)},${y(a).toFixed(2)}h${barW.toFixed(2)}V${y(0).toFixed(2)}h-${barW.toFixed(2)}Z`;
-    if (b > 0) pathB += `M${px.toFixed(2)},${y(a + b).toFixed(2)}h${barW.toFixed(2)}V${y(a).toFixed(2)}h-${barW.toFixed(2)}Z`;
-    if (finite(d.avg7)) { line += `${open ? 'L' : 'M'}${x(i).toFixed(2)},${y(d.avg7).toFixed(2)}`; open = true; } else open = false;
-  });
-  const tickCount = Math.min(6, daily.length);
-  const tickIndexes = [...new Set(Array.from({ length: tickCount }, (_, i) => tickCount === 1 ? 0 : Math.round(i * (daily.length - 1) / (tickCount - 1))))];
-  const labels = tickIndexes.map((i, at) => `<text x="${x(i)}" y="${height - 17}" text-anchor="${at === 0 ? 'start' : at === tickIndexes.length - 1 ? 'end' : 'middle'}" fill="${COLORS.muted}" font-size="13">${esc(dateLabel(daily[i].date))}</text>`).join('');
-  const peak = daily.reduce((best, day) => num(day.total) > num(best.total) ? day : best, daily[0]);
-  return `${legend(data.participants || [], true)}<p class="chart-scroll-hint">График шире экрана · прокрутите вправо →</p><div class="chart-wrap"><svg class="chart wide-chart" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="daily-title daily-desc" xmlns="http://www.w3.org/2000/svg"><title id="daily-title">Сообщения по дням</title><desc id="daily-desc">${esc(`${daily.length} календарных дней. Самый активный день: ${dateLabel(peak.date, true)}, ${int(peak.total)} сообщений. Столбцы разделены по участникам; линия — скользящее среднее за 7 дней. Полные значения в таблице под графиком.`)}</desc><g font-family="system-ui,sans-serif">${grid}<path d="${pathA}" fill="${COLORS.a}"/><path d="${pathB}" fill="${COLORS.b}"/>${line ? `<path d="${line}" stroke="${COLORS.ink}" stroke-width="2.3" fill="none" stroke-linejoin="round" stroke-linecap="round"/>` : ''}${labels}</g></svg></div>
-  <p class="panel-note">Один столбец — один календарный день, включая дни без сообщений. Линия сглаживает колебания за 7 дней.</p>
-  <details class="data-details"><summary>Все дневные значения · ${int(daily.length)} дней</summary><div class="table-scroll"><table class="metric-table"><caption class="sr-only">Количество сообщений за каждый день</caption><thead><tr><th scope="col">Дата</th><th scope="col">Всего</th>${(data.participants || []).map((p) => `<th scope="col">${personName(p)}</th>`).join('')}<th scope="col">Среднее за 7 дней</th></tr></thead><tbody>${daily.map((d) => `<tr><th scope="row">${esc(dateLabel(d.date, true))}</th><td>${int(d.total)}</td>${(data.participants || []).map((p) => `<td>${int(d[p.key === 'b' ? 'b' : 'a'])}</td>`).join('')}<td>${finite(d.avg7) ? dec(d.avg7) : '—'}</td></tr>`).join('')}</tbody></table></div></details>`;
-}
-
-function trendPanel(data) {
-  const t = data.trend || {};
-  if (!t.available) return `<div class="panel trend-panel"><div class="panel-head"><h3>Как меняется темп</h3><span class="badge">Мало данных</span></div>${empty('Для сравнения нужны 7 полных последних дней и 28 полных предыдущих дней. Первый и последний день экспорта не участвуют.')}<p class="panel-note">Небольшой фрагмент переписки не позволяет надёжно описать длительную динамику.</p></div>`;
-  const change = finite(t.changePct) ? `${t.changePct > 0 ? '+' : ''}${dec(t.changePct)}%` : 'Новый период активности';
-  const label = t.direction === 'up' ? 'Темп вырос' : t.direction === 'down' ? 'Темп снизился' : 'Темп примерно прежний';
-  const complete = (data.daily || []).slice(1, Math.max(1, (data.daily || []).length - 1));
-  const current = complete.slice(-num(t.comparisonDays));
-  const previous = complete.slice(-(num(t.comparisonDays) + num(t.baselineDays)), -num(t.comparisonDays));
-  const range = (days) => days.length ? `<span>${esc(dateLabel(days[0].date, true))} — ${esc(dateLabel(days.at(-1).date, true))}</span>` : '';
-  const delta = num(t.currentMean) - num(t.previousMean);
-  const deltaText = `${delta > 0 ? '+' : ''}${dec(delta)}`;
-  return `<div class="panel trend-panel"><div class="panel-head"><h3>Как меняется темп</h3><span class="badge">${esc(label)}</span></div><p class="trend-value">${esc(change)}</p><div class="trend-comparison"><div><strong>${dec(t.currentMean)}</strong><span>сообщений/день · последние ${int(t.comparisonDays)} дней</span>${range(current)}</div><div><strong>${dec(t.previousMean)}</strong><span>сообщений/день · предыдущие ${int(t.baselineDays)} дней</span>${range(previous)}</div></div><p class="panel-note"><strong>Изменение среднего: ${esc(deltaText)} сообщ./день.</strong></p><p class="panel-note">Сравниваем средний объём за два окна, включая дни тишины. Крайние дни экспорта исключены. Это описание изменения, а не проверка статистической значимости и не объяснение его причин.</p></div>`;
-}
-
-function rhythm(data) {
-  const s = data.summary || {};
-  const daily = data.daily || [];
-  const peak = daily.length ? daily.reduce((best, day) => num(day.total) > num(best.total) ? day : best, daily[0]) : null;
-  return `<section class="report-section" id="rhythm">${sectionHead('02 / Ритм', 'У каждого диалога свой пульс', 'Дни разговоров, паузы и перемены темпа.')}<div class="panel"><div class="panel-head"><h3>Сообщения по дням</h3><span class="badge">${int(s.days)} дней</span></div>${dailyChart(data)}</div><div class="two-col">${trendPanel(data)}<div class="panel"><div class="panel-head"><h3>Моменты на шкале времени</h3></div><dl class="fact-list"><div><dt>Самая длинная серия активных дней</dt><dd>${int(s.longestStreakDays)} дн</dd></div><div><dt>Самая длинная пауза между сообщениями</dt><dd>${duration(finite(s.longestSilenceHours) ? s.longestSilenceHours * 3600 : null)}</dd></div><div><dt>Самый активный день</dt><dd>${peak ? `${esc(dateLabel(peak.date))} <span>${int(peak.total)} сообщений</span>` : '—'}</dd></div><div><dt>Медианная длительность сессии</dt><dd>${duration(finite(s.medianSessionMinutes) ? s.medianSessionMinutes * 60 : null)}</dd></div></dl><p class="panel-note">Пауза — время между двумя соседними сообщениями. Она не включает неизвестное время до и после экспорта. Длительность сессии — интервал от первого до последнего сообщения, включая паузы, а не время непрерывного разговора.</p></div></div></section>`;
+function rhythm(data,explorerPrefs={}) {
+  const s=data.summary||{};
+  return `<section class="report-section" id="rhythm">${sectionHead('02 / Ритм', 'От общей картины — к деталям', 'Переключайте представление. Базовое окно — 7 дней.')}${renderExplorer(data,explorerPrefs)}<div class="rhythm-footnotes"><span><b>${int(s.longestStreakDays)} дней</b> — самая длинная серия общения</span><span><b>${duration(finite(s.longestSilenceHours)?s.longestSilenceHours*3600:null)}</b> — самая длинная наблюдаемая пауза</span><span><b>${duration(finite(s.medianSessionMinutes)?s.medianSessionMinutes*60:null)}</b> — медианный интервал сессии, включая паузы</span></div></section>`;
 }
 
 function splitRow(label, a, b, names, maxTotal = null, note = '') {
@@ -269,15 +203,15 @@ function methodology(data) {
   const lexical = hasLexicon(data);
   const privacy = lexical ? 'В отчёт включены выбранные частые слова и эмодзи из переписки с числом вхождений. Полные тексты сообщений, идентификаторы пользователей, ссылки из переписки и пути к вложениям в отчёт не включаются.' : 'Здесь только агрегаты: тексты сообщений, идентификаторы пользователей, ссылки из переписки и пути к вложениям в отчёт не включаются.';
   const quality = [['Записей в JSON', q.totalRecords], ['Корректных сообщений', q.validMessages], ['Служебных событий', q.serviceMessages], ['Некорректных записей', q.invalidMessages], ['Повторов', q.duplicates], ['За пределами фильтра', q.outsideRange]];
-  return `<section class="report-section" id="method">${sectionHead(`${lexical ? '06' : '05'} / Прозрачность`, 'Что стоит за цифрами', 'Все правила открыты. Ни один индекс не объясняет чувства.')}<div class="panel"><dl class="report-meta"><div><dt>Период данных</dt><dd>${esc(dateLabel(meta.startDate, true))} — ${esc(dateLabel(meta.endDate, true))}</dd></div><div><dt>Часовой пояс</dt><dd>${esc(meta.timezone === 'export' ? 'Как в экспорте Telegram' : meta.timezone || '—')}</dd></div><div><dt>Пауза между сессиями</dt><dd>${dec(meta.sessionGapHours)} ч</dd></div><div><dt>Имена участников</dt><dd>${meta.anonymize ? 'Обезличены' : 'Из экспорта'}</dd></div></dl><details class="method-details" open><summary>Как читать этот отчёт</summary><ol class="method-list"><li><strong>Сессия общения.</strong> Новая сессия начинается после паузы не меньше ${dec(meta.sessionGapHours)} ч. Её инициатор — автор первого сообщения. Первую видимую сессию не учитываем в статистике инициативы.</li><li><strong>Ответ.</strong> Измеряем время между последним сообщением одного автора и первым другого внутри одной сессии. Медиана делит измеренные паузы пополам; 90-й перцентиль — длительность, в которую укладывается примерно 90% этих пауз.</li><li><strong>Баланс.</strong> Сравниваем количество сообщений, а не вклад человека в отношения. Длина реплик, стиль переписки и недостающие фрагменты влияют на результат.</li><li><strong>Динамика.</strong> Сравниваем последние 7 полных дней с предыдущими 28 полными днями. Первый и последний календарный день экспорта исключаем из сравнения. Это описательная эвристика без проверки статистической значимости.</li><li><strong>Календарь.</strong> Дни без сообщений входят в период. Для календарных графиков используется выбранный часовой пояс; длительности считаются по реальному времени сообщений.</li><li><strong>Границы данных.</strong> Первый и последний дни могут быть неполными. Удалённые сообщения, звонки вне чата и общение в других местах в анализ не попадают. Реакции и метаданные видны только в объёме экспорта.</li><li><strong>Приватность отчёта.</strong> ${esc(privacy)} При отключённом обезличивании сохраняются имена участников.</li></ol></details><h3 class="subheading">Качество исходных данных</h3><div class="quality-grid">${quality.map(([label, value]) => `<div class="quality-item"><strong>${int(value)}</strong><span>${esc(label)}</span></div>`).join('')}</div>${(q.warnings || []).length ? `<ul class="quality-warnings">${q.warnings.map((warning) => `<li>${esc(warning)}</li>`).join('')}</ul>` : '<p class="panel-note">Дополнительных замечаний при обработке не обнаружено.</p>'}</div></section>`;
+  return `<section class="report-section" id="method">${sectionHead(`${lexical ? '06' : '05'} / Прозрачность`, 'Что стоит за цифрами', 'Правила расчёта, границы данных и пояснения.')}<div class="panel"><dl class="report-meta"><div><dt>Период данных</dt><dd>${esc(dateLabel(meta.startDate, true))} — ${esc(dateLabel(meta.endDate, true))}</dd></div><div><dt>Часовой пояс</dt><dd>${esc(meta.timezone === 'export' ? 'Как в экспорте Telegram' : meta.timezone || '—')}</dd></div><div><dt>Пауза между сессиями</dt><dd>${dec(meta.sessionGapHours)} ч</dd></div><div><dt>Имена участников</dt><dd>${meta.anonymize ? 'Обезличены' : 'Имена или заданные подписи'}</dd></div></dl><details class="method-details" open><summary>Как читать этот отчёт</summary><ol class="method-list"><li><strong>Сессия общения.</strong> Новая сессия начинается после паузы не меньше ${dec(meta.sessionGapHours)} ч. Её инициатор — автор первого сообщения. Первую видимую сессию не учитываем в статистике инициативы.</li><li><strong>Ответ.</strong> Измеряем время между последним сообщением одного автора и первым другого внутри одной сессии. Медиана делит измеренные паузы пополам; 90-й перцентиль — длительность, в которую укладывается примерно 90% этих пауз.</li><li><strong>Баланс.</strong> Сравниваем количество сообщений, а не вклад человека в отношения. Длина реплик, стиль переписки и недостающие фрагменты влияют на результат.</li><li><strong>Динамика.</strong> По умолчанию сравниваем последние 7 полных дней с предыдущими 28. Переключатель позволяет выбрать 14 к 28 или 28 к 28 дням. Сглаживание графика меняется отдельно: 1, 7, 14 или 28 дней. Первый и последний календарный день экспорта исключаем из сравнения. Это описательная эвристика без проверки статистической значимости.</li><li><strong>Календарь.</strong> Дни без сообщений входят в период. Для календарных графиков используется выбранный часовой пояс; длительности считаются по реальному времени сообщений.</li><li><strong>Границы данных.</strong> Первый и последний дни могут быть неполными. Удалённые сообщения, звонки вне чата и общение в других местах в анализ не попадают. Реакции и метаданные видны только в объёме экспорта.</li><li><strong>Приватность отчёта.</strong> ${esc(privacy)} При отключённом обезличивании сохраняются имена участников.</li></ol></details><h3 class="subheading">Качество исходных данных</h3><div class="quality-grid">${quality.map(([label, value]) => `<div class="quality-item"><strong>${int(value)}</strong><span>${esc(label)}</span></div>`).join('')}</div>${(q.warnings || []).length ? `<ul class="quality-warnings">${q.warnings.map((warning) => `<li>${esc(warning)}</li>`).join('')}</ul>` : '<p class="panel-note">Дополнительных замечаний при обработке не обнаружено.</p>'}</div></section>`;
 }
 
 /** Render a self-contained report fragment from aggregates and optional word frequencies. */
-export function renderReport(data, { mode = 'full' } = {}) {
+export function renderReport(data, { mode = 'full', explorerPrefs = {} } = {}) {
   if (!data || typeof data !== 'object') throw new TypeError('Для отчёта нужны результаты анализа.');
   if (!['full', 'overview', 'rhythm', 'dialogue'].includes(mode)) throw new TypeError('Неизвестный режим отчёта.');
   const output = [overview(data)];
-  if (mode === 'full' || mode === 'rhythm') output.push(rhythm(data));
+  if (mode === 'full' || mode === 'rhythm') output.push(rhythm(data,explorerPrefs));
   if (mode === 'full' || mode === 'dialogue') output.push(dialogue(data));
   if (mode === 'full') output.push(habits(data));
   if (hasLexicon(data)) output.push(lexicon(data));
